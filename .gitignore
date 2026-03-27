@@ -1,0 +1,17 @@
+# Secrets & local env
+.env
+.env.*
+!.env.example
+
+# Google service account JSON (contains a private key — never commit)
+allgoodpy-*.json
+*credentials*.json
+
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+dist/
+*.egg-info/
