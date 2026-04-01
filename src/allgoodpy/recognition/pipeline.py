@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass, field
 
@@ -8,6 +9,8 @@ from PIL import Image
 from pyzbar.pyzbar import decode as zbar_decode
 
 ORDER_PATTERN = re.compile(r"\b(\d{8,10}-\d{4}-\d{1})\b")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -72,15 +75,28 @@ def _rotate(bgr: np.ndarray, angle: int) -> np.ndarray:
     )
 
 
+def _ocr_pil_once(pil: Image.Image, cfg: str, lang: str | None) -> str:
+    if lang is None:
+        return pytesseract.image_to_string(pil, config=cfg) or ""
+    return pytesseract.image_to_string(pil, lang=lang, config=cfg) or ""
+
+
 def _ocr_texts(bgr: np.ndarray) -> str:
     chunks: list[str] = []
     cfg = "--oem 3 --psm 6"
+    lang_chain: tuple[str | None, ...] = ("rus+eng", "eng", None)
     for variant in _variants_bgr(_maybe_scale(bgr))[:3]:
         rgb = cv2.cvtColor(variant, cv2.COLOR_BGR2RGB)
         pil = Image.fromarray(rgb)
-        chunks.append(
-            pytesseract.image_to_string(pil, lang="rus+eng", config=cfg) or ""
-        )
+        piece = ""
+        for lang in lang_chain:
+            try:
+                piece = _ocr_pil_once(pil, cfg, lang)
+                break
+            except pytesseract.TesseractError as e:
+                logger.debug("tesseract lang=%r failed: %s", lang, e)
+                continue
+        chunks.append(piece)
     return "\n".join(chunks)
 
 
@@ -98,6 +114,10 @@ def _extract_orders(text: str) -> list[str]:
 def recognize_image_bytes(data: bytes) -> RecognitionResult:
     bgr = _np_from_bytes(data)
     barcodes = sorted(_decode_barcodes(bgr))
-    text = _ocr_texts(bgr)
+    try:
+        text = _ocr_texts(bgr)
+    except Exception as e:
+        logger.warning("OCR skipped after error: %s", e)
+        text = ""
     orders = _extract_orders(text)
     return RecognitionResult(barcodes=barcodes, order_numbers=orders)
